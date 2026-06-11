@@ -1,0 +1,125 @@
+/***
+ * Bitwuzla: Satisfiability Modulo Theories (SMT) solver.
+ *
+ * Copyright (C) 2022 by the authors listed in the AUTHORS file at
+ * https://github.com/bitwuzla/bitwuzla/blob/main/AUTHORS
+ *
+ * This file is part of Bitwuzla under the MIT license. See COPYING for more
+ * information at https://github.com/bitwuzla/bitwuzla/blob/main/COPYING
+ */
+
+#ifndef BZLA_UTIL_LOGGER_H_INCLUDED
+#define BZLA_UTIL_LOGGER_H_INCLUDED
+
+#include <cstdint>
+#include <iostream>
+
+#include "util/ostream_voider.h"
+
+#define Msg(level)                \
+  !d_logger.is_msg_enabled(level) \
+      ? (void) 0                  \
+      : bzla::util::OstreamVoider() & d_logger.msg(level).stream()
+
+#define Log(level)                \
+  !d_logger.is_log_enabled(level) \
+      ? (void) 0                  \
+      : bzla::util::OstreamVoider() & d_logger.log(level).stream()
+
+#define Warn(cond) \
+  !(cond) ? (void) 0 : bzla::util::OstreamVoider() & d_logger.warn().stream()
+
+namespace bzla::util {
+
+class Logger
+{
+ public:
+  class Line
+  {
+   public:
+    /**
+     * Constructor.
+     * @param level  The log level.
+     * @param prefix The log prefix.
+     */
+    Line(uint64_t level, std::ostream& out, const char* prefix = nullptr);
+    /**
+     * Destructor.
+     */
+    ~Line();
+    /**
+     * Get the associated output stream.
+     * @return The output stream.
+     */
+    std::ostream& stream();
+
+   private:
+    /** Stream flags saved on construction and restored on destruction. */
+    std::ios_base::fmtflags d_flags;
+    /** Output stream. */
+    std::ostream& d_out;
+  };
+
+  /**
+   * Constructor.
+   * @param log_level The log level.
+   * @param verbosity The verbosity level.
+   * @param prefix    The prefix for log/verbose messages.
+   */
+  Logger(uint64_t log_level,
+         uint64_t verbosity,
+         std::ostream& out,
+         const std::string& prefix = "");
+
+  /**
+   * Set output stream.
+   * @param out Output stream.
+   */
+  void set_stream(std::ostream& out);
+
+  /** @return True if verbose messaging is enabled for the given level. */
+  bool is_msg_enabled(uint64_t level);
+
+  /** @return True if logging is enabled for the given level. */
+  bool is_log_enabled(uint64_t level);
+
+  /**
+   * Start new log line for given level.
+   * @param level The level.
+   * @return The line.
+   */
+  Line log(uint64_t level);
+
+  /**
+   * Start new verbose message line for given level.
+   * @param level The level.
+   * @return The line.
+   */
+  Line msg(uint64_t level);
+
+  /**
+   * Start new warning message.
+   * @note Warnings are automatically configured to be enabled at level 1.
+   */
+  Line warn();
+
+  /**
+   * Set the verbosity level.
+   * @param level The verbosity level.
+   */
+  void set_verbosity_level(uint64_t level);
+
+ private:
+  /** The log level. */
+  uint64_t d_log_level;
+  /** The verbosity level. */
+  uint64_t d_verbosity_level;
+  /** The message prefix for verbose and logging messages. */
+  std::string d_prefix;
+  /** Output stream for logging. */
+  std::ostream* d_out;
+};
+
+}  // namespace bzla::util
+
+#endif

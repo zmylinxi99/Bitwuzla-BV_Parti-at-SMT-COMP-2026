@@ -3,7 +3,7 @@
 We intend to participate in SMT-COMP 2026 by submitting **Bitwuzla-BV_Parti** for the **QF_BV Parallel Track** category.
 
 - Solver type: **wrapper solver**
-- Base solver: **Bitwuzla 0.8.0**
+- Base solver: **Bitwuzla 0.9.1**
 - Authors: **Mengyu Zhao, Zhenghang Xu, and Shaowei Cai**
 - System description: `Bitwuzla-BV_Parti.pdf`
 - Pseudo-random 32-bit unsigned number: **998244353**
@@ -32,5 +32,5 @@ apt-get install python3-mpi4py
 Example command:
 
 ```bash
-./Bitwuzla-BV_Parti-at-SMT-COMP-2026-build/solver/run_BV_Parti.py 128 ./Bitwuzla-BV_Parti-at-SMT-COMP-2026-build/test/instances/bv-unsat-3.05.smt2
+./solver/run_BV_Parti.py 128 test/instances/bv-unsat-3.05.smt2
 ```

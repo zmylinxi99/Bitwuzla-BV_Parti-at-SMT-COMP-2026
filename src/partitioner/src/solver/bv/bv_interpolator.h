@@ -1,0 +1,260 @@
+/***
+ * Bitwuzla: Satisfiability Modulo Theories (SMT) solver.
+ *
+ * Copyright (C) 2024 by the authors listed in the AUTHORS file at
+ * https://github.com/bitwuzla/bitwuzla/blob/main/AUTHORS
+ *
+ * This file is part of Bitwuzla under the MIT license. See COPYING for more
+ * information at https://github.com/bitwuzla/bitwuzla/blob/main/COPYING
+ */
+
+#ifndef BZLA_SOLVER_BV_BV_INTERPOLATOR_H_INCLUDED
+#define BZLA_SOLVER_BV_BV_INTERPOLATOR_H_INCLUDED
+
+#include <cstdint>
+
+#include "backtrack/unordered_set.h"
+#include "bitblast/aig_bitblaster.h"
+#include "sat/interpolants/tracer_kinds.h"
+#include "solver/abstract/abstraction_module.h"
+#include "solver/bv/aig_bitblaster.h"
+#include "solver/bv/bv_bitblast_solver.h"
+#include "solver/fp/word_blaster.h"
+#include "solver/solver.h"
+#include "util/exceptions.h"
+#include "util/statistics.h"
+
+namespace bzla {
+
+namespace sat {
+namespace interpolants {
+class Tracer;
+}
+}  // namespace sat
+
+namespace bv {
+
+#ifdef BZLA_USE_CADICAL
+
+class AigBitblaster;
+class BvSolver;
+class InterpolationBitblaster;
+
+class BvInterpolator
+{
+ public:
+  BvInterpolator(Env& env, SolverState& state, BvBitblastSolver& bb_solver);
+  ~BvInterpolator();
+
+  /**
+   * Get interpolant I of a formulas A and B such that
+   * (and A B) is unsat and (=> A I) and (=> I (not B)) are valid.
+   *
+   * For computing the interpolant, we require that the satisfiability of
+   * (and A B) has been determined as unsat. That is,
+   *   - A and B must have been asserted
+   *   - and its satisfiability must have been determined via solve() as unsat
+   *     before calling this function.
+   *
+   * @param ppA The set of formulas A, given as preprocessed assertions.
+   * @param ppB The set of formulas B, given as preprocessed assertions.
+   *
+   * @note In case the abstraction module is enabled, sets ppA and ppB must
+   *       contain the abstracted version of assertions with abstracted terms.
+   *       This is necessary because for labeling, the interpolation engine
+   *       needs to process the assertions that have actually been processed
+   *       during solving.
+   */
+  Node interpolant(const std::vector<Node>& ppA, const std::vector<Node>& ppB);
+
+  /** Get statistics. */
+  const auto& statistics() const { return d_stats; }
+
+  struct Statistics
+  {
+    Statistics(util::Statistics& stats, const std::string& prefix);
+    util::TimerStatistic& time_sat;
+    util::TimerStatistic& time_interpol;
+    util::TimerStatistic& time_bitblast;
+    util::TimerStatistic& time_label;
+    util::TimerStatistic& time_encode;
+    uint64_t& size_interpolant;
+    uint64_t& bb_num_aig_ands;
+    uint64_t& bb_num_aig_consts;
+    uint64_t& bb_num_aig_shared;
+    uint64_t& bb_num_cnf_vars;
+    uint64_t& bb_num_cnf_clauses;
+    uint64_t& bb_num_cnf_literals;
+  } d_stats;
+
+ private:
+  /** Update AIG and CNF statistics. */
+  void update_statistics();
+
+  /**
+   * Label associated SAT clauses in a given set of nodes.
+   * @param clause_labels The clause labels map to add to. Maps AIG ids to
+   *                      clause labels.
+   * @param nodes         The nodes.
+   * @param kind          The clause kind to label with.
+   */
+  void label_clauses(
+      std::unordered_map<int64_t, sat::interpolants::ClauseKind>& clause_labels,
+      const std::vector<Node>& nodes,
+      sat::interpolants::ClauseKind kind);
+  /**
+   * Label all SAT variables associated with assertions in A and B.
+   *
+   * SAT variables that occur in both A and B are labeled as
+   * VariableKind::GLOBAL. SAT variables that correspond to ANDs associated with
+   * an assertion are labeled based on the label of their children, i.e., only
+   * if all children are labeled as VariableKind::GLOBAL, it is labeled as
+   * GLOBAL.
+   *
+   * @param var_labels  The variable labels map to add to. Maps AIG ids to
+   *                    variable labels.
+   * @param term_labels Map from terms to variable labels. If any input of a
+   *                    term is labeled as A/B-local, the term is labeled as
+   *                    A/B-local, and GLOBAL otherwise.
+   * @param ppA         The set of preprocessed A assertions.
+   * @param ppB         The set of preprocessed B assertions.
+   */
+  void label_vars(
+      std::unordered_map<int64_t, sat::interpolants::VariableKind>& var_labels,
+      std::unordered_map<Node, sat::interpolants::VariableKind>& term_labels,
+      const std::vector<Node>& ppA,
+      const std::vector<Node>& ppB);
+
+  /**
+   * Label SAT variables associated with bits of consts in given set of `nodes`
+   * with label `kind`.
+   *
+   * If consts occur in both A and B, the corresponding SAT variables are
+   * labeled as VariableKind::GLOBAL.
+   *
+   * Helper for label_vars().
+   *
+   * @param var_labels  The variable labels map to add to. Maps AIG ids to
+   *                    variable labels.
+   * @param term_labels Map from terms to variable labels. If any input of a
+   *                    term is labeled as A/B-local, the term is labeled as
+   *                    A/B-local, and GLOBAL otherwise.
+   * @param nodes       The set of nodes.
+   * @param kind        The variable kind to label with.
+   */
+  void label_consts(
+      std::unordered_map<int64_t, sat::interpolants::VariableKind>& var_labels,
+      std::unordered_map<Node, sat::interpolants::VariableKind>& term_labels,
+      const std::vector<Node>& nodes,
+      sat::interpolants::VariableKind kind);
+  /**
+   * Label terms based on their children in a given set of `nodes`.
+   * Additionally, label the bits of the bit-vector representation of BvSolver
+   * leafs (that are not consts) depending on their corresponding term label.
+   * Only if all children are labeled as VariableKind::GLOBAL, a leaf is
+   * labeled as GLOBAL. Mixed labeling of children (A and B) cannot occur.
+   *
+   * Helper for label_vars().
+   *
+   * @param var_labels  The variable labels map to add to. Maps AIG ids to
+   *                    variable labels.
+   * @param term_labels Map from terms to variable labels. If any input of a
+   *                    term is labeled as A/B-local, the term is labeled as
+   *                    A/B-local, and GLOBAL otherwise.
+   * @param nodes       The set of nodes.
+   * @param kind        The variable kind to label with.
+   */
+  void label_terms_and_leafs(
+      std::unordered_map<int64_t, sat::interpolants::VariableKind>& var_labels,
+      std::unordered_map<Node, sat::interpolants::VariableKind>& term_labels,
+      const std::vector<Node>& nodes);
+  /**
+   * Label SAT variables associated with given `bits` with label `kind`.
+   * If they occur in both A and B, they are labeled as VariableKind::GLOBAL.
+   *
+   * Helper for label_consts() and label_leafs().
+   *
+   * @param var_labels  The variable labels map to add to. Maps AIG ids to
+   *                    variable labels.
+   * @param nodes       The set of nodes.
+   * @param kind        The variable kind to label with.
+   */
+  void label_var(
+      std::unordered_map<int64_t, sat::interpolants::VariableKind>& var_labels,
+      const bitblast::AigBitblaster::Bits& bits,
+      sat::interpolants::VariableKind kind);
+  /**
+   * Label unlabeled SAT variables occuring in a lemma depending on which kind
+   * the non-GLOBAL variables in the lemma are assigned to.
+   *
+   * That is,
+   * * A, S: labeled as A
+   * * B, S: labeled as B
+   * * S: labeled as A
+   *
+   * @note Currently, we do not allow lemmas with "mixed" occurrences, i.e.,
+   *       occurences of both A and B local variables.
+   *
+   * @param var_labels    The variable labels map.
+   * @param clause_labels The clause labels map.
+   * @param term_labels    Map from terms to variable labels. If any input of a
+   *                       term is labeled as A/B-local, the term is labeled as
+   *                       A/B-local, and GLOBAL otherwise.
+   * @param node          The lemma.
+   */
+  void label_lemma(
+      std::unordered_map<int64_t, sat::interpolants::VariableKind>& var_labels,
+      std::unordered_map<int64_t, sat::interpolants::ClauseKind>& clause_labels,
+      std::unordered_map<Node, sat::interpolants::VariableKind>& term_labels,
+      const Node& node);
+
+  /**
+   * Log current state of bitblaster cache when given log level is enabled.
+   * @param level The log level.
+   */
+  void log_bitblaster_cache(uint64_t level) const;
+
+  /** The associated environment. */
+  Env& d_env;
+  /** The associated logger instance. */
+  util::Logger& d_logger;
+
+  /** The current set of lemmas. */
+  const backtrack::unordered_set<Node>& d_lemmas;
+
+  /** AIG bit-blaster. */
+  AigBitblaster& d_bitblaster;
+  /** The associated proof tracer for interpolants. */
+  sat::interpolants::Tracer* d_tracer;
+  /** The associated word_blaster. */
+  const fp::WordBlaster& d_word_blaster;
+  /** The associated abstraction module, nulllptr if disabled. */
+  abstract::AbstractionModule* d_am = nullptr;
+};
+
+#else
+
+class BvInterpolator
+{
+ public:
+  BvInterpolator(Env& env, SolverState& state, BvBitblastSolver& bb_solver)
+  {
+    (void) env;
+    (void) state;
+    (void) bb_solver;
+  }
+  Node interpolant(const std::vector<Node>& ppA, const std::vector<Node>& ppB)
+  {
+    (void) ppA;
+    (void) ppB;
+    throw Unsupported(
+        "interpolant generation only supported when CaDiCaL is available");
+  }
+};
+
+#endif
+
+}  // namespace bv
+}  // namespace bzla
+
+#endif

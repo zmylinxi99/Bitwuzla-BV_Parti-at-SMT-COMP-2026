@@ -1,0 +1,11 @@
+[wrap-file]
+directory = kissat-rel-4.0.4
+
+source_url = https://github.com/arminbiere/kissat/archive/refs/tags/rel-4.0.4.tar.gz
+source_filename = kissat-rel-4.0.4.tar.gz
+source_hash = bfe93eaa6323b48011e4b1fcf74b3f2e20f9de544767e728009e5b2018296193
+
+patch_directory = kissat
+
+[provide]
+kissat = kissat_dep
