@@ -7,7 +7,7 @@ We intend to participate in SMT-COMP 2026 by submitting **Bitwuzla-BV_Parti** fo
 - Authors: **Mengyu Zhao, Zhenghang Xu, and Shaowei Cai**
 - System description: `Bitwuzla-BV_Parti.pdf`
 - Pseudo-random 32-bit unsigned number: **998244353**
-- Zenodo DOI: TBD
+- Zenodo DOI: 10.5281/zenodo.20636805
 
 ## BV_Parti: Feasible-Domain Guided Partitioning for QF_BV
 
